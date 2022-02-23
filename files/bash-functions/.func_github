@@ -1,0 +1,24 @@
+###### Required ######
+#   Tokens/Keys:
+#    - Github
+#    - GITHUB_TOKEN
+
+# synchronizes trunk into current branch
+gsync() {
+	_current="" _trunk="master"
+	if [[ -z $1 ]]; then
+		_current=$(git branch | grep \* | cut -d ' ' -f2)
+	else
+		_current="$1"
+	fi
+	if [[ ! -z $2 ]]; then
+		_trunk="$2"
+	fi
+
+	echo " >> Synchronizing: $_trunk -> $_current"
+	git checkout $_trunk
+	git pull
+	git fetch --all --prune
+	git checkout $_current
+	git rebase $_trunk
+}

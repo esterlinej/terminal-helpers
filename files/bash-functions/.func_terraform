@@ -1,0 +1,37 @@
+###### Required ######
+#   VPN depending on AWS Account: Production: DEV VPN, Development: kube-development-<region>
+#   Tokens/Keys:
+#    - terraform
+#    - AWS CLI + Credentials & Write Access to S3 to retrieve and update statefile
+#    - JENKINS_USER, JENKINS_TOKEN
+
+### TERRAFORM ####################################################################
+
+# defines AWS_PROFILE=default or with user provided override
+set_aws_profile () {
+        local _profile="default"
+        if [[ $1 ]]; then
+            _profile=$1
+        fi
+        AWS_PROFILE=$_profile
+}
+
+# include the AWS_PROFILE name after the bash function to define a profile other than default
+terra_init () {
+        set_aws_profile $1
+        terraform version
+        terraform init
+}
+
+# creates terraform with jenkins credentials
+terra_plan_jenkins () {
+        terraform plan -out=plan -var jenkins_user=$JENKINS_USER -var jenkins_token=$JENKINS_TOKEN $@
+}
+
+terra_plan () {
+        terraform plan -out=plan $@
+}
+
+terra_apply () {
+        terraform apply plan
+}

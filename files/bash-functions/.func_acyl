@@ -1,0 +1,223 @@
+###### Required ######
+#   DEV VPN
+#   Tokens/Keys:
+#    - Vault
+#    - Github
+#    - Acyl
+#   kubectl
+#    - https://kubernetes.io/docs/tasks/tools/install-kubectl/
+#    - $ brew install kubernetes-cli
+#   http
+#    - https://httpie.org/
+#    - $ brew install httpie
+
+### ACYL ######################################################################
+
+# set $ACYL_TOKEN
+acyl_token() {
+	local _aat="" _path="secret/services/acyl/qa/api_keys/"
+	if [[ $ACYL_TOKEN ]]; then
+		echo " >> Acyl Token: ${ACYL_TOKEN}"
+	else
+		if [[ $ACYL_API_TOKEN ]]; then
+			# check in case token is stored under different environment variable
+			export ACYL_TOKEN=$ACYL_API_TOKEN
+			echo " >> Acyl Token: ${ACYL_TOKEN}"
+		else
+			if [[ $VAULT_TOKEN ]]; then
+				if [[ $1 ]]; then
+					_path="$1"
+				fi
+				echo " >> ACYL_TOKEN missing or empty, checking Vault path: ${_path}..."
+				_aat=$(vault read -field=value $_path | sed -e 's/,.*//g')
+				if [[ $_aat ]]; then
+					export ACYL_TOKEN=$_aat
+					echo " >> Acyl Token: ${ACYL_TOKEN}"
+				else
+					echo " >> Acyl API Token not set!"
+				fi
+			else
+				echo " >> Vault Token not set! Unable to check vault path for Acyl Token."
+			fi
+		fi
+	fi
+}
+
+# defaut acyl host
+acyl_host() {
+	local _host="acyl.shave.io"
+	if [[ $1 ]]; then
+		export ACYL_HOST=$1
+	else
+		export ACYL_HOST=$_host
+	fi
+	echo " >> Acyl Host: ${ACYL_HOST}"
+}
+
+# print acyl environment details
+env_get() {
+	local _name="" _env=""
+	if [[ ! $1 ]]; then
+		echo " >> Required Param (Environment Name) missing!"
+		echo "    example: $ env_get <env_name>"
+		return 1
+	fi
+	if [[ ! $ACYL_TOKEN ]]; then
+		acyl_token
+	fi
+	if [[ ! $ACYL_HOST ]]; then
+		acyl_host
+	fi
+	if [[ $ACYL_TOKEN ]] && [[ $ACYL_HOST ]]; then
+		_name=$1
+		_env=$(kubectl get ns |grep nitro |awk '{print $1}' |grep $_name |cut -d- -f3-)
+		http GET "https://${ACYL_HOST}/v2/envs/${_env}" "API-Key: ${ACYL_TOKEN}" |jq
+	fi
+}
+
+# print environment and status for the search filter defined
+env_status() {
+	local _envs="" _env="" _stat=""
+	if [[ ! $ACYL_TOKEN ]]; then
+		acyl_token
+	fi
+	if [[ ! $ACYL_HOST ]]; then
+		acyl_host
+	fi
+	if [[ $ACYL_TOKEN ]] && [[ $ACYL_HOST ]]; then
+		_envs=$(kubectl get ns |grep nitro |awk '{print $1}' |cut -d- -f3-)
+		for e in $_envs; do
+			_env=$(http GET "https://${ACYL_HOST}/v2/envs/${e}" "API-Key: ${ACYL_TOKEN}")
+			_stat=$(echo "${_env}" |jq .status |sed -e 's/^"//' -e 's/"$//')
+			if [[ ! $_stat == null ]] || [[ ! -z $_stat ]]; then
+				echo "Environment: ${e} | Status: ${_stat}"
+			else
+				echo "${_env}" |jq
+			fi
+			_stat=""
+			_env=""
+		done
+	fi
+}
+
+# cleanup failed or destroyed environments that are still live
+env_cleanup() {
+	local _envs="" _env="" _stat="" _name="" _resp="" _err=""
+	if [[ ! $ACYL_TOKEN ]]; then
+		acyl_token
+	fi
+	if [[ ! $ACYL_HOST ]]; then
+		acyl_host
+	fi
+	if [[ $ACYL_TOKEN ]] && [[ $ACYL_HOST ]]; then
+		_envs=$(kubectl get ns |grep nitro |awk '{print $1}')
+		for e in $_envs; do
+			_name=$(echo "${e}" |cut -d- -f3-)
+			_env=$(http GET "https://${ACYL_HOST}/v2/envs/${_name}" "API-Key: ${ACYL_TOKEN}")
+			_stat=$(echo "${_env}" |jq .status |sed -e 's/^"//' -e 's/"$//')
+			if [[ $_stat == "Failure" ]] || [[ $_stat == "Destroyed" ]] || [[ $_stat == null ]]; then
+				echo "Name: ${e} | Status: ${_stat}"
+				_resp=$(http DELETE "https://${ACYL_HOST}/envs/${_name}" "API-Key: ${ACYL_TOKEN}")
+				_err=$(echo "${_resp}" |jq .error_details |sed -e 's/^"//' -e 's/"$//')
+				if [[ $_err == "not found" ]]; then
+					echo "  !! Acyl Environment Not Found; Deleting with kubectl..."
+					_resp=$(kubectl delete ns ${e})
+					echo "  >> ${_resp}"
+				else
+					echo "  >> Acyl Environment Deleted"
+				fi
+			fi
+			_stat=""
+			_env=""
+			_resp=""
+		done
+	fi
+}
+
+# destroys all current nitro environments, regardless of status or Pull Request
+envs_destroy() {
+	local _envs="" _env="" _name="" _resp="" _err=""
+	if [[ ! $ACYL_TOKEN ]]; then
+		acyl_token
+	fi
+	if [[ ! $ACYL_HOST ]]; then
+		acyl_host
+	fi
+	if [[ $ACYL_TOKEN ]] && [[ $ACYL_HOST ]]; then
+		read -p " !! Are you sure?... " -n 1 -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]];then
+			echo ""
+			return 1
+		fi
+		echo ""
+		_envs=$(kubectl get ns |grep nitro |awk '{print $1}')
+		for e in $_envs; do
+			_name=$(echo "${e}" |cut -d- -f3-)
+			_resp=$(http DELETE "https://${ACYL_HOST}/envs/${_name}" "API-Key: ${ACYL_TOKEN}")
+			_err=$(echo "${_resp}" |jq .error_details |sed -e 's/^"//' -e 's/"$//')
+			if [[ $_err == "not found" ]]; then
+				echo "  !! Acyl Environment Not Found; Delete ${e} manually with kubectl..."
+			else
+				echo "  >> Acyl Environment ${e} Deleted"
+			fi
+			_name=""
+			_env=""
+			_resp=""
+		done
+	fi
+}
+
+# delete environment by name
+env_delete() {
+	local _env="" _name="" _resp="" _err=""
+	if [[ ! $1 ]]; then
+		echo " >> Environment Name Required!"
+		echo "    example: $ env_delete <environment_name>"
+		return 1
+	fi
+	if [[ ! $ACYL_TOKEN ]]; then
+		acyl_token
+	fi
+	if [[ ! $ACYL_HOST ]]; then
+		acyl_host
+	fi
+	if [[ $ACYL_TOKEN ]] && [[ $ACYL_HOST ]]; then
+		read -p " !! Are you sure?... " -n 1 -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]];then
+			echo ""
+			return 1
+		fi
+		echo ""
+		_name=$1
+		echo "Searching for environment: ${_name}"
+		_env=$(kubectl get ns |grep $_name |awk '{print $1}' |cut -d- -f3-)
+		if [[ ! -z $_env ]]; then
+			_resp=$(http DELETE "https://${ACYL_HOST}/envs/${_env}" "API-Key: ${ACYL_TOKEN}")
+			_err=$(echo "${_resp}" |jq .error_details |sed -e 's/^"//' -e 's/"$//')
+			if [[ $_err == "not found" ]]; then
+				echo "  !! Acyl Environment Not Found; Delete ${e} manually with kubectl..."
+			else
+				echo "  >> Acyl Environment ${e} Deleted"
+			fi
+		fi
+	fi
+}
+
+# get nitro build logs for environment by webhook sha in the response
+nitro_logs() {
+	if [[ ! $1 ]]; then
+		echo " >> Required Param (Event Log ID) missing!"
+		echo "    example: $ nitro_logs <eventlog_id>"
+		return 1
+	fi
+	if [[ ! $ACYL_TOKEN ]]; then
+		acyl_token
+	fi
+	if [[ ! $ACYL_HOST ]]; then
+		acyl_host
+	fi
+	if [[ $ACYL_TOKEN ]] && [[ $ACYL_HOST ]]; then
+		echo "EVENTLOG_ID: $1"
+		http GET https://${ACYL_HOST}/v2/eventlog/$1 "API-Key: ${ACYL_TOKEN}" |jq .log
+	fi
+}

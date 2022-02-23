@@ -1,0 +1,43 @@
+###### Required ######
+#   DEV VPN
+#   kubectl
+#    - https://kubernetes.io/docs/tasks/tools/install-kubectl/
+#    - $ brew install kubernetes-cli
+
+### KUBECTL ###################################################################
+
+# kenv sets the environment to $ENV_NAME
+kenv() {
+	local _resp=""
+	unset ENV_NAME
+	if [[ $1 ]]; then
+		_resp=$(kubectl get ns |grep $1 |grep -v Terminating |awk '{ print $1 }' )
+		if [[ $_resp == "" ]]; then
+			echo " >> Envirotnment Not Found: $1"
+		else
+			export ENV_NAME=$_resp
+			echo "ENV_NAME: $ENV_NAME"
+		fi
+	else
+		echo " >> Missing Environement Name!"
+	fi
+}
+
+# k is shorthand for `kubectl --namespace $ENV_NAME (COMMANDS)`
+# Example: `k get pods`
+k() {
+	local _env=$ENV_NAME
+	if [[ $_env ]]; then
+		if [[ $1 ]]; then
+			if [[ $$_env  ]]; then
+				echo " - Running: kubectl -n $_env $@"
+				kubectl -n $_env $@
+			fi
+		else
+			echo " >> Need at least two arguments..."
+			echo " >> Construct: kubectl -n $_env $@"
+		fi
+	else
+		echo " >> Environement 'ENV_NAME' Not Defined!"
+	fi
+}

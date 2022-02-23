@@ -1,0 +1,35 @@
+###### Required ######
+#   DEV VPN
+#   Tokens/Keys:
+#    - Vault
+#    - Github
+
+### VAULT #####################################################################
+
+# refresh vault token, set $VAULT_ADDR and $VAULT_TOKEN
+ref_vault() {
+    local _resp _vtoken _vhost="vault.shave.io" _vport="8200"
+    unset VAULT_TOKEN
+    if [[ $1 ]]; then
+        _vhost=$1
+        if [[ $2 ]]; then
+            _vport=$2
+        fi
+    fi
+    export VAULT_ADDR="https://${_vhost}:${_vport}"
+    echo "VAULT_ADDR: $VAULT_ADDR"
+    if [[ $GITHUB_TOKEN ]]; then
+        _vtoken=$(vault login -method=github token=${GITHUB_TOKEN} | grep -w "token  " | awk '{ print $2 }')
+        if [[ $_vtoken  ]]; then
+            export VAULT_TOKEN=$_vtoken
+            echo "VAULT_TOKEN: $VAULT_TOKEN"
+            echo "Listing Vault: 'vault list secret/'"
+            vault list secret/
+        else
+            echo " >> Issue Retrieving Vault Token!"
+            echo " >> CMD: vault login -method=github token=${GITHUB_TOKEN} | grep -w \"token  \" | awk '{ print \$2 }'"
+        fi
+    else
+        echo " >> GITHUB_TOKEN not set!"
+    fi
+}
