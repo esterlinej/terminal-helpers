@@ -1,4 +1,4 @@
-# platform-tools
+# terminal-helpers
 scripts, automation, shortcuts for platform, DQAs, and more
 
 ## Terminal
